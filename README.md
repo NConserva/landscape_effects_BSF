@@ -1,4 +1,4 @@
-Data et Rcode repository of the study: **"The effects of landscape changes on the Brazilian spotted fever incidence."**
+Data and Rcode repository of the study: **"The effects of landscape changes on the Brazilian spotted fever incidence."**
 
 **Graphical abstract**\
 <img src="graph_abstract.png" align="center" alt="" />
