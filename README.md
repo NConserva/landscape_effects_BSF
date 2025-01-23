@@ -2,7 +2,7 @@ Data et Rcode repository of the study: **"The effects of landscape changes on th
 
 **Graphical abstract**
 
-<img src="graph_abstract.png" align="center" alt="" />
+
 
 **Abstract**
 
