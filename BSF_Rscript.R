@@ -23,6 +23,8 @@
   library(spdep) #
   library(rgdal) #
   library(DHARMa) #
+  library(performance)
+  library(forcats)
 }
 
 #data:                                                                                          ####
@@ -40,17 +42,16 @@
   library(tidyr)
   data <- data %>% drop_na(ED)  
   data <- data %>% drop_na(PD)
-  data <- data %>% drop_na(ENN_MN)
-  #when no forest cover in the municipality, these variables display NAs
+  #when no forest cover in the municipality, these variables display NAs (see FRAGSTATS softaware:)
   
   # scaling:
-  data[,c(3:22)] <- scale(data[,c(3:22)])
+  data[,c(3:12)] <- scale(data[,c(3:12)])
 
   
 }
 
 # LM BSF cases                                                                                  ####
-{
+{ # linear regressions to investigate significance of the increase in cases with the years
   #LM data, from DataSUS
   {
   dt <- as.data.frame(cbind(
@@ -107,10 +108,11 @@
   summary(LM)
   # to assess significant increases in BSF cases
 
-}
+} 
 
 #autochtone vs resident cases correlation                                                       ####
-{
+{ # average proportion of autochthon cases per year and correlation between autochton and residential 
+  # cases (municipality of residence of the patient)
   #LM data, from DataSUS
   {
     dt <- as.data.frame(cbind(
@@ -179,382 +181,637 @@ library(corrplot)
   # To avoid colinearity issues in models, allowing variables together in a same model when
   # spearman coefficient is < 0.7, spearman coefficient was used because variables did not display
   # normal distributions
-Corr <- cor(data[,c(3:22)], method = "spearman", use="pairwise.complete.obs")
+Corr <- cor(data[,c(3:12)], method = "spearman", use="pairwise.complete.obs")
 is.na(Corr) <- abs(Corr) < 0.7
 Corr[is.na(Corr)] <- 0
 corrplot(Corr, method = "number", type="upper",pch.cex = 1, number.cex =0.5 ,tl.cex = 1, tl.col="black" 
-         ,col=colorRampPalette(c("#BB4444", "#EE9988", "white", "#77AADD", "#4477AA"))(200))
+         ,col=colorRampPalette(c("#BB4444", "#EE9988", "white", "#77AADD", "#4477AA"))(200),)
 
 }
 
 #MODELS:                                                                                        ####
 
-library(glmmTMB)
+library(glmmTMB) #Generalized linear mixed models glmmTMB package
 
-mod_null <- glmmTMB(BSF_cases ~ 1 
-                    + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
+# Null model (intercepts only):
+
+system.time(mod_null <- glmmTMB(BSF_cases ~ 1 
+                    + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data))
 save(mod_null,file="mod_null.Rdata")
 
-# choice of the most relevant climatic variable to include in the LULC models:                  ####
-{
-  Corr <- cor(data[,c(19:22)], method = "spearman", use="pairwise.complete.obs")
-  is.na(Corr) <- abs(Corr) < 0.7
-  Corr[is.na(Corr)] <- 0
-  corrplot(Corr, method = "number", type="upper",pch.cex = 1, number.cex = ,tl.cex = 1, tl.col="black" 
-           ,col=colorRampPalette(c("#BB4444", "#EE9988", "gray", "#77AADD", "#4477AA"))(200))
-  
-  clima_1 <- glmmTMB(BSF_cases ~ temp 
-                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(clima_1,file="clima_1.Rdata")
-  
-  clima_2 <- glmmTMB(BSF_cases ~ prec
-                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(clima_2,file="clima_2.Rdata")
-  
-  clima_3 <- glmmTMB(BSF_cases ~ temp + prec
-                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(clima_3,file="clima_3.Rdata")
-  
-  clima_4 <- glmmTMB(BSF_cases ~ cold_temp
-                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(clima_4,file="clima_4.Rdata")
-  
-  clima_5 <- glmmTMB(BSF_cases ~ hot_temp
-                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(clima_5,file="clima_5.Rdata")
-  
-  clima_6 <- glmmTMB(BSF_cases ~ cold_temp + prec
-                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(clima_6,file="clima_6.Rdata")
-  
-  clima_7 <- glmmTMB(BSF_cases ~ hot_temp + prec
-                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(clima_7,file="clima_7.Rdata")
-  
-  load("mod_null.Rdata")
-  load("clima_1.Rdata")
-  load("clima_2.Rdata")
-  load("clima_3.Rdata")
-  load("clima_4.Rdata")
-  load("clima_5.Rdata")
-  load("clima_6.Rdata")
-  load("clima_7.Rdata")
-  
-  library(bbmle)
-  
-  tab <- AICctab(mod_null,clima_1,clima_2,clima_3,clima_4,clima_5,clima_6,clima_7
-                 ,base=T,delta=T,sort=T,weights=T,nobs=59104)
-  
-  tab <- as.data.frame(tab)
-  tab
-  
-  summary(modclima_1)
-  summary(modclima_4)
-  summary(modclima_3)
-  
-}
-  
 
-# landscape model:                                                                              ####
+# landscape composition and climate models:                                                                              ####
 {
   # Models
   {
-  mod_null <- glmmTMB(BSF_cases ~ 1 
-                      + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(mod_null,file="mod_null.Rdata")
-  
-  land_1 <- glmmTMB(BSF_cases ~ PLAND + temp
+  lc_1 <- glmmTMB(BSF_cases ~ PLAND + temp + prec
                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_1,file="land_1.Rdata")
+  save(lc_1,file="lc_1.Rdata")
   
-  land_2 <- glmmTMB(BSF_cases ~ Primary_Forest + temp
+  lc_2 <- glmmTMB(BSF_cases ~ Secondary_Forest + temp + prec
                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_2,file="land_2.Rdata")
+  save(lc_2,file="lc_2.Rdata")
   
-  land_3 <- glmmTMB(BSF_cases ~ Secondary_Forest + temp
+  lc_3 <- glmmTMB(BSF_cases ~ Riparian_Forest + temp + prec
                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_3,file="land_3.Rdata")
+  save(lc_3,file="lc_3.Rdata")
   
-  land_4 <- glmmTMB(BSF_cases ~ PD + temp
+  lc_4 <- glmmTMB(BSF_cases ~ PLAND_Pasture + temp + prec
                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_4,file="land_4.Rdata")
+  save(lc_4,file="lc_4.Rdata")
   
-  land_5 <- glmmTMB(BSF_cases ~ Primary_Forest*PD + temp
+  lc_5 <- glmmTMB(BSF_cases ~ PLAND_Agriculture + temp + prec
                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_5,file="land_5.Rdata")
+  save(lc_5,file="lc_5.Rdata")
   
-  land_6 <- glmmTMB(BSF_cases ~ Secondary_Forest*PD + temp
+  lc_6 <- glmmTMB(BSF_cases ~ PLAND_Mosaic_of_Uses + temp + prec
                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_6,file="land_6.Rdata")
+  save(lc_6,file="lc_6.Rdata")
   
-  land_7 <- glmmTMB(BSF_cases ~ PLAND*PD + temp
+  lc_7 <- glmmTMB(BSF_cases ~ PLAND + PLAND_Pasture + temp + prec
                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_7,file="land_7.Rdata")
+  save(lc_7,file="lc_7.Rdata")
   
-  land_8 <- glmmTMB(BSF_cases ~ Primary_Forest + PD + temp
+  lc_8 <- glmmTMB(BSF_cases ~ PLAND + PLAND_Agriculture + temp + prec
                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_8,file="land_8.Rdata")
+  save(lc_8,file="lc_8.Rdata")
   
-  land_9 <- glmmTMB(BSF_cases ~ Secondary_Forest + PD + temp
+  lc_9 <- glmmTMB(BSF_cases ~ PLAND + PLAND_Mosaic_of_Uses + temp + prec
                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_9,file="land_9.Rdata")
+  save(lc_9,file="lc_9.Rdata")
   
-  land_10 <- glmmTMB(BSF_cases ~ PLAND + PD + temp
+  lc_10 <- glmmTMB(BSF_cases ~ Riparian_Forest + PLAND_Pasture + temp + prec
                      + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_10,file="land_10.Rdata")
+  save(lc_10,file="lc_10.Rdata")
   
-  land_11 <- glmmTMB(BSF_cases ~  ED + temp
+  lc_11 <- glmmTMB(BSF_cases ~  Riparian_Forest + PLAND_Agriculture + temp + prec
                      + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_11,file="land_11.Rdata")
+  save(lc_11,file="lc_11.Rdata")
   
-  land_12 <- glmmTMB(BSF_cases ~  ENN_MN + temp
+  lc_12 <- glmmTMB(BSF_cases ~  Riparian_Forest + PLAND_Mosaic_of_Uses + temp + prec
                      + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_12,file="land_12.Rdata")
+  save(lc_12,file="lc_12.Rdata")
   
-  land_13 <- glmmTMB(BSF_cases ~  PD + ENN_MN + temp
+  
+  # landscape structure (composition and configuration) and climate models:  ####
+  
+  
+  ls_1 <- glmmTMB(BSF_cases ~ PLAND + PD + temp + prec
                      + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_13,file="land_13.Rdata")
+  save(ls_1,file="ls_1.Rdata")
   
-  land_14 <- glmmTMB(BSF_cases ~  PD + ED + temp
+  ls_2 <- glmmTMB(BSF_cases ~ PLAND*PD + temp + prec
                      + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_14,file="land_14.Rdata")
+  save(ls_2,file="ls_2.Rdata")
   
-  land_15 <- glmmTMB(BSF_cases ~  Riparian_Forest + temp
+  ls_3 <- glmmTMB(BSF_cases ~ PLAND*PD + PLAND_Pasture + temp + prec
                      + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_15,file="land_15.Rdata")
+  save(ls_3,file="ls_3.Rdata")
   
-  land_16 <- glmmTMB(BSF_cases ~ PLAND_Agriculture + temp
+  ls_4 <- glmmTMB(BSF_cases ~ PLAND*PD + PLAND_Agriculture + temp + prec
                      + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_16,file="land_16.Rdata")
+  save(ls_4,file="ls_4.Rdata")
   
-  land_17 <- glmmTMB(BSF_cases ~  PLAND_Pasture + temp
+  ls_5 <- glmmTMB(BSF_cases ~ PLAND*PD + PLAND_Mosaic_of_Uses + temp + prec
                      + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_17,file="land_17.Rdata")
+  save(ls_5,file="ls_5.Rdata")
   
-  land_18 <- glmmTMB(BSF_cases ~ PLAND_Mosaic_of_Uses + temp
+  ls_6 <- glmmTMB(BSF_cases ~ Secondary_Forest*PD + PLAND_Pasture + temp + prec
                      + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_18,file="land_18.Rdata")
+  save(ls_6,file="ls_6.Rdata")
   
-  land_19 <- glmmTMB(BSF_cases ~ Secondary_Forest + PLAND_Agriculture + temp
+  ls_7 <- glmmTMB(BSF_cases ~ Secondary_Forest*PD + PLAND_Agriculture + temp + prec
                      + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_19,file="land_19.Rdata")
+  save(ls_7,file="ls_7.Rdata")
   
-  land_20 <- glmmTMB(BSF_cases ~ Secondary_Forest + PLAND_Pasture + temp
+  ls_8 <- glmmTMB(BSF_cases ~ Secondary_Forest*PD + PLAND_Mosaic_of_Uses + temp + prec
                      + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_20,file="land_20.Rdata")
+  save(ls_8,file="ls_8.Rdata")
   
-  land_21 <- glmmTMB(BSF_cases ~ Secondary_Forest + PLAND_Mosaic_of_Uses + temp
+  ls_9 <- glmmTMB(BSF_cases ~ Riparian_Forest*PD + PLAND_Pasture + temp + prec
                      + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_21,file="land_21.Rdata")
+  save(ls_9,file="ls_9.Rdata")
   
-  land_22 <- glmmTMB(BSF_cases ~ Primary_Forest + PLAND_Agriculture + temp
+  ls_10 <- glmmTMB(BSF_cases ~ Riparian_Forest*PD + PLAND_Agriculture + temp + prec
                      + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_22,file="land_22.Rdata")
+  save(ls_10,file="ls_10.Rdata")
   
-  land_23 <- glmmTMB(BSF_cases ~ Primary_Forest + PLAND_Pasture + temp
+  ls_11 <- glmmTMB(BSF_cases ~ Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp + prec
                      + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_23,file="land_23.Rdata")
+  save(ls_11,file="ls_11.Rdata")
   
-  land_24 <- glmmTMB(BSF_cases ~ Primary_Forest + PLAND_Mosaic_of_Uses + temp
-                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_24,file="land_24.Rdata")
+  ls_12 <- glmmTMB(BSF_cases ~ ED + PLAND_Pasture + temp + prec
+                   + offset(log(Population)) + (1|Year) + (1|CD_NUM),family=nbinom1(link="log"), data=data)
+  save(ls_12,file="ls_12.Rdata")
   
-  land_25 <- glmmTMB(BSF_cases ~ Riparian_Forest + PD + PLAND_Agriculture + temp
-                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_25,file="land_25.Rdata")
+  ls_13 <- glmmTMB(BSF_cases ~ ED + PLAND_Agriculture + temp + prec
+                   + offset(log(Population)) + (1|Year) + (1|CD_NUM),family=nbinom1(link="log"), data=data)
+  save(ls_13,file="ls_13.Rdata")
   
-  land_26 <- glmmTMB(BSF_cases ~ Riparian_Forest*PD + PLAND_Agriculture + temp
-                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_26,file="land_26.Rdata")
+  ls_14 <- glmmTMB(BSF_cases ~ ED + PLAND_Mosaic_of_Uses + temp + prec
+                   + offset(log(Population)) + (1|Year) + (1|CD_NUM),family=nbinom1(link="log"), data=data)
+  save(ls_14,file="ls_14.Rdata")
   
-  land_27 <- glmmTMB(BSF_cases ~ Riparian_Forest + PLAND_Agriculture + temp
-                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_27,file="land_27.Rdata")
   
-  land_28 <- glmmTMB(BSF_cases ~ Riparian_Forest + PD + PLAND_Pasture + temp
-                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_28,file="land_28.Rdata")
-  
-  land_29 <- glmmTMB(BSF_cases ~ Riparian_Forest*PD + PLAND_Pasture + temp
-                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_29,file="land_29.Rdata")
-  
-  land_30 <- glmmTMB(BSF_cases ~ Riparian_Forest + PLAND_Pasture + temp
-                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_30,file="land_30.Rdata")
-  
-  land_31 <- glmmTMB(BSF_cases ~ Riparian_Forest + PD + PLAND_Mosaic_of_Uses + temp
-                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_31,file="land_31.Rdata")
-  
-  land_32 <- glmmTMB(BSF_cases ~ Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp
-                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_32,file="land_32.Rdata")
-  
-  land_33 <- glmmTMB(BSF_cases ~ Riparian_Forest + PLAND_Mosaic_of_Uses + temp
-                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_33,file="land_33.Rdata")
-  
-  land_34 <- glmmTMB(BSF_cases ~ Primary_Forest*PD + PLAND_Mosaic_of_Uses + temp
-                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_34,file="land_34.Rdata")
-  
-  land_35 <- glmmTMB(BSF_cases ~ Secondary_Forest*PD + PLAND_Mosaic_of_Uses + temp
-                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_35,file="land_35.Rdata")
-  
-  land_36 <- glmmTMB(BSF_cases ~ PLAND*PD + PLAND_Mosaic_of_Uses + temp
-                     + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data)
-  save(land_36,file="land_36.Rdata")
-  
-  }
-  
-  # Loading models
-  {
-    load("mod_null.Rdata")
-    load("land_1.Rdata")
-    load("land_2.Rdata")
-    load("land_3.Rdata")
-    load("land_4.Rdata")
-    load("land_5.Rdata")
-    load("land_6.Rdata")
-    load("land_7.Rdata")
-    load("land_8.Rdata")
-    load("land_9.Rdata")
-    load("land_10.Rdata")
-    load("land_11.Rdata")
-    load("land_12.Rdata")
-    load("land_13.Rdata")
-    load("land_14.Rdata")
-    load("land_15.Rdata")
-    load("land_16.Rdata")
-    load("land_17.Rdata")
-    load("land_18.Rdata")
-    load("land_19.Rdata")
-    load("land_20.Rdata")
-    load("land_21.Rdata")
-    load("land_22.Rdata")
-    load("land_23.Rdata")
-    load("land_24.Rdata")
-    load("land_25.Rdata")
-    load("land_26.Rdata")
-    load("land_27.Rdata")
-    load("land_28.Rdata")
-    load("land_29.Rdata")
-    load("land_30.Rdata")
-    load("land_31.Rdata")
-    load("land_32.Rdata")
-    load("land_33.Rdata")
-    load("land_34.Rdata")
-    load("land_35.Rdata")
-    load("land_36.Rdata")
-    
-  }
-  
-  # VIF
-  {
-  library(performance)
-  
-  check_collinearity(land_1)
-  check_collinearity(land_2)
-  check_collinearity(land_3)
-  check_collinearity(land_4)
-  check_collinearity(land_5)
-  check_collinearity(land_6)
-  check_collinearity(land_7)
-  check_collinearity(land_8)
-  check_collinearity(land_9)
-  check_collinearity(land_10)
-  check_collinearity(land_11)
-  check_collinearity(land_12)
-  check_collinearity(land_13)
-  check_collinearity(land_14)
-  check_collinearity(land_15)
-  check_collinearity(land_16)
-  check_collinearity(land_17)
-  check_collinearity(land_18)
-  check_collinearity(land_19)
-  check_collinearity(land_20)
-  check_collinearity(land_21)
-  check_collinearity(land_22)
-  check_collinearity(land_23)
-  check_collinearity(land_24)
-  check_collinearity(land_25)
-  check_collinearity(land_26)
-  check_collinearity(land_27)
-  check_collinearity(land_28)
-  check_collinearity(land_29)
-  check_collinearity(land_30)
-  check_collinearity(land_31)
-  check_collinearity(land_32)
-  check_collinearity(land_33)
-  check_collinearity(land_34)
-  check_collinearity(land_35)
-  check_collinearity(land_36)
-}
-  
-  # AICc selection
+  # a first AICc selection, to select the best predictors:
+  library(bbmle)
   {
     AICctab(
       mod_null,
-      land_1,
-      land_2,
-      land_3,
-      land_4,
-      land_5,
-      land_6,
-      land_7,
-      land_8,
-      land_9,
-      land_10,
-      land_11,
-      land_12,
-      land_13,
-      land_14,
-      land_15,
-      land_16,
-      land_17,
-      land_18,
-      land_19,
-      land_20,
-      land_21,
-      land_22,
-      land_23,
-      land_24,
-      land_25,
-      land_26,
-      land_27,
-      land_28,
-      land_29,
-      land_30,
-      land_31,
-      land_32,
-      land_33,
-      land_34,
-      land_35,
-      land_36,
+      
+      lc_1,
+      lc_2,
+      lc_3,
+      lc_4,
+      lc_5,
+      lc_6,
+      lc_7,
+      lc_8,
+      lc_9,
+      lc_10,
+      lc_11,
+      lc_12,
+      
+      ls_1,
+      ls_2,
+      ls_3,
+      ls_4,
+      ls_5,
+      ls_6,
+      ls_7,
+      ls_8,
+      ls_9,
+      ls_10,
+      ls_11,
+      ls_12,
+      ls_13,
+      ls_14,
+      
       base=T,delta=T,sort=T,weights=T,nobs=59104)
+  }
+  
+  
+  # Trying zero-inflated negative binomiale models with the best AIC selected model from the ones above:
+  
+  
+  ls_11zi <- glmmTMB(BSF_cases ~ Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp + prec
+                   + offset(log(Population)) + (1|Year)+ (1|CD_NUM), ziformula=~1,family=nbinom1(link="log"), data=data)
+  save(ls_11zi,file="ls_11zi.Rdata")
+  
+  ls_11zi2 <- glmmTMB(BSF_cases ~ Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp + prec
+                                         + offset(log(Population)) + (1|Year)+ (1|CD_NUM), ziformula=~Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp + prec
+                                         + offset(log(Population)),family=nbinom1(link="log"), data=data ) #note: no random intercept in ziformula
+  save(ls_11zi2,file="ls_11zi2.Rdata")
+  
+  ls_11zi3 <- glmmTMB(BSF_cases ~ Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp + prec
+                                          + offset(log(Population)) + (1|Year)+ (1|CD_NUM), ziformula=~Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp + prec
+                                          + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data ) #CONVERGENCE ISSUES when adding 
+                                                                                                                                    # random intercept in the ziformula
+  save(ls_11zi3,file="ls_11zi3.Rdata")
+  
+  
+  #switching to different optimizer to see if convergence can be achieved:
+  
+  time <- system.time(
+    ls_11zi4 <- glmmTMB(BSF_cases ~ Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp + prec
+                                        + offset(log(Population)) + (1|Year)+ (1|CD_NUM), ziformula=~Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp + prec
+                                        + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data,
+                                        control = glmmTMBControl(optimizer = optim, optArgs = list(method = "L-BFGS-B")))) #25min, CONVERGENCE ISSUES
+  save(ls_11zi4,file="ls_11zi4.Rdata")
+  
+  library(nloptr)
+  time <- system.time(
+    ls_11zi5 <- glmmTMB(BSF_cases ~ Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp + prec
+                                          + offset(log(Population)) + (1|Year)+ (1|CD_NUM), ziformula=~Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp + prec
+                                          + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data,
+                                          control = glmmTMBControl(optimizer = bobyqa, optArgs = list(method = "NLOPT_LN_BOBYQA")))) #17min, CONVERGENCE ISSUES
+  save(ls_11zi5,file="ls_11zi5.Rdata")
+  
+  time <- system.time(
+    ls_11zi6 <- glmmTMB(BSF_cases ~ Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp + prec
+                                          + offset(log(Population)) + (1|Year)+ (1|CD_NUM), ziformula=~Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp + prec
+                                          + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=data,
+                                          control = glmmTMBControl(optimizer = optim, optArgs = list(method = "CG")))) # few days
+  
+  
+  #ziformula with only climate variables that explain structural zero (more ecologically relevant)
+  
+  ls_11zi6 <- glmmTMB(BSF_cases ~ Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp + prec
+                      + offset(log(Population)) + (1|Year)+ (1|CD_NUM), ziformula=~ temp + prec
+                      + offset(log(Population)),family=nbinom1(link="log"), data=data ) #note: only climate for probability of structural zero
+  save(ls_11zi6,file="ls_11zi6.Rdata")
+  
+  
+  #Exploring different personalized dispersion functions in models:
+  
+  
+  ls_11dis <- glmmTMB(BSF_cases ~ Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp + prec
+                   + offset(log(Population))  + (1|Year)+ (1|CD_NUM),dispformula = ~Year,family=nbinom1(link="log"), data=data)
+  save(ls_11dis,file="ls_11dis.Rdata")
+  
+  
+  ls_11dis2 <- glmmTMB(BSF_cases ~ Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp + prec
+                    + offset(log(Population))  + (1|Year)+ (1|CD_NUM),dispformula = ~PD,family=nbinom1(link="log"), data=data)
+  save(ls_11dis2,file="ls_11dis2.Rdata")
+  
+  ls_11dis3 <- glmmTMB(BSF_cases ~ Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp + prec
+                       + offset(log(Population))  + (1|Year)+ (1|CD_NUM),dispformula = ~ temp+ prec,family=nbinom1(link="log"), data=data)
+  save(ls_11dis3,file="ls_11dis3.Rdata")
+  
+  ls_11diszi3 <- glmmTMB(BSF_cases ~ Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp + prec
+                    + offset(log(Population))  + (1|Year)+ (1|CD_NUM),ziformula=~Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp + prec
+                    + offset(log(Population)),dispformula = ~Year,family=nbinom1(link="log"), data=data)
+  save(ls_11diszi3,file="ls_11diszi3.Rdata")
+  
+
+  ls_11po <- glmmTMB(BSF_cases ~ Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp 
+                   + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=poisson(link="log"), data=data)
+  save(ls_11po,file="ls_11po.Rdata") #with poisson distribution
+
+  
+  ls_11gen <- glmmTMB(BSF_cases ~ Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp + prec
+                   + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=genpois(link="log"), data=data)
+  save(ls_11gen,file="ls_11gen.Rdata") #with general poisson distribution
+
+  }
+  
+  # Loading all models previously fitted 
+  {
+    load("mod_null.Rdata")
+    
+    load("lc_1.Rdata")
+    load("lc_2.Rdata")
+    load("lc_3.Rdata")
+    load("lc_4.Rdata")
+    load("lc_5.Rdata")
+    load("lc_6.Rdata")
+    load("lc_7.Rdata")
+    load("lc_8.Rdata")
+    load("lc_9.Rdata")
+    load("lc_10.Rdata")
+    load("lc_11.Rdata")
+    load("lc_12.Rdata")
+    
+    load("ls_1.Rdata")
+    load("ls_2.Rdata")
+    load("ls_3.Rdata")
+    load("ls_4.Rdata")
+    load("ls_5.Rdata")
+    load("ls_6.Rdata")
+    load("ls_7.Rdata")
+    load("ls_8.Rdata")
+    load("ls_9.Rdata")
+    load("ls_10.Rdata")
+    load("ls_11.Rdata")
+    load("ls_12.Rdata")
+    load("ls_13.Rdata")
+    load("ls_14.Rdata")
+    
+    load("ls_11zi.Rdata")
+    load("ls_11zi2.Rdata")
+    load("ls_11zi3.Rdata")
+
+    load("ls_11zi5.Rdata")
+    load("ls_11zi6.Rdata")
+    
+    load("ls_11dis.Rdata")
+    load("ls_11dis2.Rdata")
+    load("ls_11diszi3.Rdata")
+    load("ls_11po.Rdata")
+    load("ls_11gen.Rdata")
+
+  }
+  
+  # VIF
+  library(performance)
+  { #check the VIF for collinearity
+  
+  check_collinearity(lc_1)
+  check_collinearity(lc_2)
+  check_collinearity(lc_3)
+  check_collinearity(lc_4)
+  check_collinearity(lc_5)
+  check_collinearity(lc_6)
+  check_collinearity(lc_7)
+  check_collinearity(lc_8)
+  check_collinearity(lc_9)
+  check_collinearity(lc_10)
+  check_collinearity(lc_11)
+  check_collinearity(lc_12)
+  
+  check_collinearity(ls_1)
+  check_collinearity(ls_2)
+  check_collinearity(ls_3)
+  check_collinearity(ls_4)
+  check_collinearity(ls_5)
+  check_collinearity(ls_6)
+  check_collinearity(ls_7)
+  check_collinearity(ls_8)
+  check_collinearity(ls_9)
+  check_collinearity(ls_10)
+  check_collinearity(ls_11)
+  check_collinearity(ls_12)
+  check_collinearity(ls_13)
+  check_collinearity(ls_14)
+
+  check_collinearity(ls_11zi)
+  check_collinearity(ls_11zi2) #collinearity
+  check_collinearity(ls_11zi6)
+  
+  check_collinearity(ls_11dis)
+  check_collinearity(ls_11dis2)
+  check_collinearity(ls_11diszi3) #collinearity
+
+}
+  
+  # Full AICc model selection
+  library(bbmle)
+  {
+    AICctab(
+      mod_null,
+      
+      lc_1,
+      lc_2,
+      lc_3,
+      lc_4,
+      lc_5,
+      lc_6,
+      lc_7,
+      lc_8,
+      lc_9,
+      lc_10,
+      lc_11,
+      lc_12,
+      
+      ls_1,
+      ls_2,
+      ls_3,
+      ls_4,
+      ls_5,
+      ls_6,
+      ls_7,
+      ls_8,
+      ls_9,
+      ls_10,
+      ls_11,
+      ls_12,
+      ls_13,
+      ls_14,
+      
+      ls_11zi,
+      ls_11zi2,
+      ls_11zi6,
+      
+      ls_11dis,
+      ls_11dis2,
+      ls_11diszi3,
+      
+      base=T,delta=T,sort=T,weights=T,logLik=T,nobs=59126)
     
   }
 
-  summary(land_32)
+
+  # Models assumptions and 'performance'  ####
+  library(DHARMa)
   
-  # plot coefficients 
+  #residuals from the variant models of ls_11 (take a few secondes each)
+  sim11 <- simulateResiduals(fittedModel = ls_11)
+  sim11zi <- simulateResiduals(fittedModel = ls_11zi)
+  sim11zi2 <- simulateResiduals(fittedModel = ls_11zi2)
+  sim11zi6 <- simulateResiduals(fittedModel = ls_11zi6)
+  sim11dis <- simulateResiduals(fittedModel = ls_11dis)
+  sim11dis2 <- simulateResiduals(fittedModel = ls_11dis2)
+  sim11diszi3 <- simulateResiduals(fittedModel = ls_11diszi3)
+  sim11gen <- simulateResiduals(fittedModel = ls_11gen)
+  
+  # inspection of the default ls_11: Despite slightly significative, DHARMA tests looks ok. Also, tests used here are more sensible when dealing with large dataset 
+  {
+  sim <- sim11
+  plot(sim,form=data$Year) # (slight deviation make the test significant with large dataset, should not be consider as a problem)
+  plot(sim) # direct interpretation  of the general QQ plot is difficult because there is many data point
+  testDispersion(sim,alternative = "less") # a bit underdispersed d=0.04, p=0.016, this test however is not reliable for underdispersion (DHARMa 'help')
+  testZeroInflation(sim) #no zero inflation detected (note: test not always reliable with GLMM)
+  
+  #plot deviance residuals:
+  data$fitted <- predict(ls_11,type='response',se=F)
+  m<-ls_11
+  {
+  plot(data$fitted,residuals(m,type='deviance'))
+  abline(a=2,b=0,col="red")
+  abline(a=-2,b=0,col="red")
+  prop <- (length(residuals(m,type='deviance')) -(sum(residuals(m,type='deviance')< -2) + sum(residuals(m,type='deviance')> 2)))/length(residuals(m,type='deviance'))
+  title(c("Porportion of Deviance residuals within -2 and 2 values:", round(prop,5)))
+  }
+  }
+  
+  # ls_11zi: DHARMa test less good than ls_11
+  {
+    sim <- sim11zi
+    plot(sim,form=data$Year) # seems bit worse than ls_11
+    plot(sim)
+    testDispersion(sim,alternative = "less") # bit more underdispersed than ls_11, d=0.02, p=0.016
+    testZeroInflation(sim) 
+    
+    #plot deviance residuals:
+    data$fitted <- predict(ls_11zi,type='response',se=F)
+    m<-ls_11zi
+    {
+      plot(data$fitted,residuals(m,type='deviance'))
+      abline(a=2,b=0,col="red")
+      abline(a=-2,b=0,col="red")
+      prop <- (length(residuals(m,type='deviance')) -(sum(residuals(m,type='deviance')< -2) + sum(residuals(m,type='deviance')> 2)))/length(residuals(m,type='deviance'))
+      title(c("Porportion of Deviance residuals within -2 and 2 values:", round(prop,5)))
+    }
+  }
+
+  # ls_11zi2: Dharma tests quite good, non significant, Howerver VIF detect collinearity
+  {
+  sim <- sim11zi2
+  plot(sim,form=data$Year) # seems better
+  plot(sim) # direct interpretation  of the general QQ plot is difficult because there is many data point
+  testDispersion(sim,alternative = "less") # less underdispersed d=0.094, p=0.084
+  testZeroInflation(sim) 
+  
+  #plot deviance residuals:
+  data$fitted <- predict(ls_11zi2,type='response',se=F)
+  m<-ls_11zi2
+  {
+    plot(data$fitted,residuals(m,type='deviance'))
+    abline(a=2,b=0,col="red")
+    abline(a=-2,b=0,col="red")
+    prop <- (length(residuals(m,type='deviance')) -(sum(residuals(m,type='deviance')< -2) + sum(residuals(m,type='deviance')> 2)))/length(residuals(m,type='deviance'))
+    title(c("Porportion of Deviance residuals within -2 and 2 values:", round(prop,5)))
+  }
+  }
+  
+  # ls_11zi6: Dharma tests quite good, bit better than ls_11, 
+  {
+    sim <- sim11zi6
+    plot(sim,form=data$Year) # seems better
+    plot(sim) 
+    testDispersion(sim,alternative = "less") # bit more underdispersed d=0.056, p=0.028
+    testZeroInflation(sim) 
+    
+    #plot deviance residuals:
+    data$fitted <- predict(ls_11zi6,type='response',se=F)
+    m<-ls_11zi6
+    {
+      plot(data$fitted,residuals(m,type='deviance'))
+      abline(a=2,b=0,col="red")
+      abline(a=-2,b=0,col="red")
+      prop <- (length(residuals(m,type='deviance')) -(sum(residuals(m,type='deviance')< -2) + sum(residuals(m,type='deviance')> 2)))/length(residuals(m,type='deviance'))
+      title(c("Porportion of Deviance residuals within -2 and 2 values:", round(prop,5)))
+    }
+  }
+  
+  # ls_11dis: Tests here are much more significative, moreover,deviance residulas could indicate overfitting
+  {
+  sim <- sim11dis
+  plot(sim,form=data$Year) 
+  plot(sim) # direct interpretation  of the general QQ plot is difficult because there is many data point
+  testDispersion(sim,alternative = "less") # much more underdispersed d=0.0094, p=2.2e-16
+  testZeroInflation(sim) 
+  testOutliers(sim)
+  
+  #plot deviance residuals:
+  data$fitted <- predict(ls_11dis,type='response',se=F)
+  m<-ls_11dis
+  {
+    plot(data$fitted,residuals(m,type='deviance'))
+    abline(a=0.2,b=0,col="red")
+    abline(a=-0.2,b=0,col="red")
+    prop <- (length(residuals(m,type='deviance')) -(sum(residuals(m,type='deviance')< -0.2) + sum(residuals(m,type='deviance')> 0.2)))/length(residuals(m,type='deviance'))
+    title(c("Porportion of Deviance residuals within -0.2 and 0.2 values:", round(prop,5)))
+  } #much smaller deviance residuals, overfitting model?
+  }
+  
+  # ls_11dis2: Dharma tests look all good
+  {
+    sim <- sim11dis2
+    plot(sim,form=data$Year) # everything looks ok
+    plot(sim) # direct interpretation  of the general QQ plot is difficult because there is many data point
+    testDispersion(sim,alternative = "less") # less underdispersed d=0.016, p=0.04
+    testZeroInflation(sim) 
+    testOutliers(sim)
+    
+    #plot deviance residuals:
+    data$fitted <- predict(ls_11dis2,type='response',se=F)
+    m<-ls_11dis2
+    {
+      plot(data$fitted,residuals(m,type='deviance'))
+      abline(a=2,b=0,col="red")
+      abline(a=-2,b=0,col="red")
+      prop <- (length(residuals(m,type='deviance')) -(sum(residuals(m,type='deviance')< -2) + sum(residuals(m,type='deviance')> 2)))/length(residuals(m,type='deviance'))
+      title(c("Porportion of Deviance residuals within -2 and 2 values:", round(prop,5)))
+    } #seems not overfitting
+  }
+  
+  # ls_11gen: non uniformity of residuals in year 2002
+  {
+    sim <- sim11gen
+    plot(sim,form=data$Year) # 2002 year not uniform residual distrtibution, but again this is a year with little information
+    plot(sim) # direct interpretation  of the general QQ plot is difficult because there is many data point
+    testDispersion(sim,alternative = "less") # less underdispersed d=0.044, p=0.032
+    testZeroInflation(sim) 
+    testOutliers(sim)
+  }
+  
+  # ls_11diszi3:  test worst than ls_11, almost significant outliers, might be overfitting regarding the deviance residuals plot
+  {
+    sim <- sim11diszi3
+    plot(sim,form=data$Year)
+    plot(sim) 
+    testDispersion(sim,alternative = "less") # more underdispersed than ls_11 d=0.018, p=0.004
+    testZeroInflation(sim) 
+    testOutliers(sim) #Outliers
+    
+    #plot deviance residuals:
+    data$fitted <- predict(ls_11diszi3,type='response',se=F)
+    m<-ls_11diszi3
+    {
+      plot(data$fitted,residuals(m,type='deviance'))
+      abline(a=2,b=0,col="red")
+      abline(a=-2,b=0,col="red")
+      prop <- (length(residuals(m,type='deviance')) -(sum(residuals(m,type='deviance')< -2) + sum(residuals(m,type='deviance')> 2)))/length(residuals(m,type='deviance'))
+      title(c("Porportion of Deviance residuals within -2 and 2 values:", round(prop,5)))
+    } #seems not overfitting
+  }
+  
+  
+  #Cross-validation with RMSE:
+  library(cv)
+  time <- system.time(cv_ls11 <- cv(ls_11,data=data, k=10, criterion=rmse)) 
+  time <- system.time(cv_ls11zi <-cv(ls_11zi,data=data, k=10, criterion=rmse))
+  time <- system.time(cv_ls11zi2 <-cv(ls_11zi2,data=data, k=10, criterion=rmse)) 
+  time <- system.time(cv_ls11zi6 <-cv(ls_11zi6,data=data, k=10, criterion=rmse)) 
+  time <- system.time(cv_ls11dis <-cv(ls_11dis,data=data, k=10, criterion=rmse)) 
+  time <- system.time(cv_ls11dis2 <-cv(ls_11dis2,data=data, k=10, criterion=rmse))
+  time <- system.time(cv_ls11diszi3 <-cv(ls_11diszi3,data=data, k=10, criterion=rmse))
+  time <- system.time(cv_ls14 <-cv(ls_14,data=data, k=10, criterion=rmse))
+  time <- system.time(cv_null <-cv(mod_null,data=data, k=10, criterion=rmse))
+  
+  save(cv_ls11,file="cv_ls11.RData")
+  save(cv_ls11zi,file="cv_ls11zi.RData")
+  save(cv_ls11zi2,file="cv_ls11zi2.RData")
+  save(cv_ls11zi6,file="cv_ls11zi6.RData")
+  save(cv_ls11dis,file="cv_ls11dis.RData")
+  save(cv_ls11dis2,file="cv_ls11dis2.RData")
+  save(cv_ls11diszi3,file="cv_ls11diszi3.RData")
+  save(cv_ls14,file="cv_ls14.RData")
+  save(cv_null,file="cv_null.RData")
+  
+  cv_rmse <- as.data.frame(
+    rbind(
+      c("cv_ls11",round(cv_ls11$`CV crit`,4),round(cv_ls11$`full crit`,4)),
+      c("cv_ls11zi",round(cv_ls11zi$`CV crit`,4),round(cv_ls11zi$`full crit`,4)),
+      c("cv_ls11zi2",round(cv_ls11zi2$`CV crit`,4),round(cv_ls11zi2$`full crit`,4)),
+      c("cv_ls11zi6",round(cv_ls11zi6$`CV crit`,4),round(cv_ls11zi6$`full crit`,4)),
+      c("cv_ls11dis",round(cv_ls11dis$`CV crit`,4),round(cv_ls11dis$`full crit`,4)),
+      c("cv_ls11dis2",round(cv_ls11dis2$`CV crit`,4),round(cv_ls11dis2$`full crit`,4)),
+      c("cv_ls11diszi3",round(cv_ls11diszi3$`CV crit`,4),round(cv_ls11diszi3$`full crit`,4))
+      
+      
+      )
+    )
+  colnames(cv_rmse) <- c("cv_model_label","cv_rmse","sample_rmse")
+  cv_rmse
+  save(cv_rmse,file="cv_rmse.RData")
+  load("cv_rmse.RData")
+  
+
+  
+  
+  #rmse doesn't improve much between model, rmse also stay the similar when performing external cv with 2020 and 2021 (done eslewhere)
+  
+  r2_nakagawa(ls_11zi6) # cond: 0.261 ; marginal : 0.020
+  r2_nakagawa(ls_11zi2) # cond: 0.228 ; marginal : 0.024
+  r2_nakagawa(ls_11) # cond: 0.270 ; marginal : 0.020
+  
+  # Pseudo R2 provided for informative purpose, not my religion tho
+
+
+  
+  
+  # plot coefficients    ####
   {
     
-    data_plot <- as.data.frame(summary(land_32)$coefficients$cond)[-c(1:2),1]
-    data_plot <- cbind(Variables=rownames(summary(land_32)$coefficients$cond)[-c(1:2)],Coefficients=data_plot)
+    m<-ls_11
+    summary(m)
+    
+    data_plot <- as.data.frame(summary(m)$coefficients$cond)[-c(1:2),1]
+    data_plot <- cbind(Variables=rownames(summary(m)$coefficients$cond)[-c(1:2)],Coefficients=data_plot)
     data_plot <- as.data.frame(data_plot) 
     colnames(data_plot)[2] <- "Coefficients"
     data_plot$Coefficients <- as.numeric(data_plot$Coefficients)
-    conf <- cbind(confint(land_32,full=F,level=0.95)[,1],confint(land_32,full=F,level=0.95)[,2])
-    conf <- conf[-c(1,2,7,8),]
-    conf85 <- cbind(confint(land_32,full=F,level=0.85)[,1],confint(land_32,full=F,level=0.85)[,2])
-    conf85 <- conf85[-c(1,2,7,8),]
+    conf <- cbind(confint(m,full=F,level=0.95)[,1],confint(ls_11,full=F,level=0.95)[,2])
+    conf <- conf[-c(1,2,8,9),]
+    conf85 <- cbind(confint(m,full=F,level=0.85)[,1],confint(ls_11,full=F,level=0.85)[,2])
+    conf85 <- conf85[-c(1,2,8,9),]
     data_plot <- cbind(data_plot,conf1=conf[,1],conf2=conf[,2],conf85.1=conf85[,1],conf85.2=conf85[,2])
     
-    data_plot$Variables <- as.factor(c("PD **","PLAND Mosaic of Uses ***","temp ***","Riparian Forest : PD ***"))
-    data_plot$Variables<- fct_relevel(data_plot$Variables,c("PD **","Riparian Forest : PD ***","PLAND Mosaic of Uses ***","temp ***"))
+    library(forcats)
+    data_plot$Variables <- as.factor(c("PD **","PLAND Mosaic of Uses ***","temp ***","prec","Riparian Forest : PD ***"))
+    data_plot$Variables<- fct_relevel(data_plot$Variables,c("PD **","Riparian Forest : PD ***","PLAND Mosaic of Uses ***","temp ***","prec"))
     data_plot$Variables<- fct_rev(data_plot$Variables)
     
     plot <- ggplot(data_plot) +
@@ -564,7 +821,7 @@ save(mod_null,file="mod_null.Rdata")
       geom_errorbar( aes(x=Variables, ymin=Coefficients, ymax=Coefficients), linewidth=1.25, alpha=0.9, width=0.12) +
       geom_point( aes(x=Variables, y=Coefficients), stat="identity", fill="purple", alpha=0,size=0) +
       scale_alpha_manual(values = c("0.3"=0.3, "0.9"=0.9), guide='none')+
-      scale_colour_manual(values = c("temp ***"="#E57373","PLAND Mosaic of Uses ***"="#FFD54F","PD **"="#AED581","Riparian Forest : PD ***"="#90CAF9"), guide='none')+
+      scale_colour_manual(values = c("temp ***"="#E57373","prec"="#0D47A1","PLAND Mosaic of Uses ***"="#FFD54F","PD **"="#AED581","Riparian Forest : PD ***"="#90CAF9"), guide='none')+
       coord_flip() + theme_bw() + theme(legend.position = "none",axis.text=element_text(size=15,face="bold"),
                                         axis.title=element_text(size=15,face="bold"))
     plot
@@ -572,87 +829,15 @@ save(mod_null,file="mod_null.Rdata")
     save(plot,file="plot.Rdata")
     
     library(effects)
-    plot(allEffects(land_32)) # overview of the marginal effects 
+    plot(allEffects(ls_11)) # overview of the marginal effects 
     
-    # Contour plot (better representation of the interaction effect Riparian_Forest:PD)
-    {
-      library(lattice)
-  
-      rip <- rep(seq(0,100,1),each=101)
-      PD<-rep(seq(0,8,0.08),101) 
-      predT<-exp(fixef(land_34)$cond[1]+fixef(land_34)$cond[2]*scale(rip)[,1]+fixef(land_34)$cond[3]*scale(PD)[,1] 
-                 +fixef(land_34)$cond[6]*scale(rip*PD)[,1])
-
-      d <- as.data.frame(cbind(PD,rip,predT))
-      d$predT <- d$predT*(10^8)
-      
-      #color palette for contour plot
-      {
-        cvi_colours = list(
-          cvi_purples = c("#381532", "#4b1b42", "#5d2252", "#702963",
-                          "#833074", "#953784", "#a83e95"),
-          my_favourite_colours = c("#702963", "#637029",    "#296370"),
-          cvi_PD_rip = c("#1B5E20","#AED581","#64B5F6","#0D47A1"),
-          pur_PD_rip = c("lightgrey","#953784","#5d2252","#381532"),
-          red_PD_rip = c("#fedccd","#fcb398","#fc8666","#f6573e","#dd2a25","#b31218","#67000d")
-        )
-        
-        cvi_palettes = function(name, n, all_palettes = cvi_colours, type = c("discrete", "continuous")) {
-          palette = all_palettes[[name]]
-          if (missing(n)) {
-            n = length(palette)
-          }
-          type = match.arg(type)
-          out = switch(type,
-                       continuous = grDevices::colorRampPalette(palette)(n),
-                       discrete = palette[1:n]
-          )
-          structure(out, name = name, class = "palette")
-        }
-        # save in ggplot library:
-        cvi_palettes("my_favourite_colours", type = "discrete")
-        
-        scale_colour_cvi_d = function(name) {
-          ggplot2::scale_colour_manual(values = cvi_palettes(name,type = "discrete"))
-        }
-        scale_fill_cvi_d = function(name) {
-          ggplot2::scale_fill_manual(values = cvi_palettes(name,
-                                                           type = "discrete"))
-        }
-        
-        
-        scale_colour_cvi_c = function(name) {
-          ggplot2::scale_colour_gradientn(colours = cvi_palettes(name = name,
-                                                                 type = "continuous"))
-        }
-        scale_fill_cvi_c = function(name) {
-          ggplot2::scale_fill_gradientn(colours = cvi_palettes(name = name,
-                                                               type = "continuous"))
-        }
-        scale_color_cvi_d = scale_colour_cvi_d
-        scale_color_cvi_c = scale_colour_cvi_c
-        
-      }
-      
-      plot(cvi_palettes("red_PD_rip", type = "continuous", n = 10))
-      col <- c(cvi_palettes("red_PD_rip", type = "continuous", n =2560))
-      
-      conplot <- ggplot(d,aes(x=rip,y=PD,z=predT)) +
-        ylim(0,NA)+ xlab("Riparian Forest") + ylab("PD")+ xlim(0,NA)+
-        theme_bw() + theme(axis.text=element_text(size=15,face="bold"),
-                           axis.title=element_text(size=15,face="bold")) +
-        geom_contour_filled(bins = 10,fill=col,col='black') +
-        guides( fill=guide_legend(title="BSF incidence"))
-      conplot 
-
-    }
     
   }
   
-  # plot predicted values and identification of ecological tresholds by segmented models
+  # plot predicted values of the observed data against predictors and identification of ecological tresholds by segmented models
   {
     
-    #data without scaling :                                                                                          ####
+    # re-import data without scaling :                                                                                          ####
     {
       data <- read.csv("BSF_LULC_2001_2019.csv",header=T)
       
@@ -671,13 +856,11 @@ save(mod_null,file="mod_null.Rdata")
       
     }
     
-    load("land_32.RData")
-    pred <- predict(land_32,type="response",se.fit=T) 
-    save(pred,file="pred.Rdata")
-    load("pred.Rdata")
-    
-    #cor(data$BSF_cases, pred$fit)
-    #cor((data$BSF_cases/data$Population)*100000,(pred$fit/data$Population)*100000)
+    load("ls_11.RData")
+    pred_ls_11 <- predict(ls_11,type="response",se.fit=T) 
+    save(pred_ls_11,file="pred_ls_11.Rdata")
+    load("pred_ls_11.Rdata")
+    pred <- pred_ls_11
 
     data$pred <- (pred$fit/data$Population)*100000 #in BSF incidence per 100.000 inhabitants
     data$lci <- data$pred - (((pred$se.fit/data$Population)*100000))
@@ -699,11 +882,11 @@ save(mod_null,file="mod_null.Rdata")
     {
       lo <- loess(pred~PD,data=data)
       data$lo <- lo$fitted
-      data <- data[order(data$PD, decreasing = F),]
+      data_ord <- data[order(data$PD, decreasing = F),]
       
       library(segmented)
       
-      model <- lm(lo ~ PD, data = data)
+      model <- lm(lo ~ PD, data = data_ord)
       segmented_model <- segmented(model, seg.Z = ~PD,npsi=5,control = seg.control(n.boot=20,quant=T))
       seg_preds <- predict(segmented_model)
       seg_res <- data$lo - seg_preds
@@ -711,25 +894,53 @@ save(mod_null,file="mod_null.Rdata")
       plot(
         data$PD, data$lo,
         main = "Piecewise Regression Fit",
-        xlab = "Independent Variable (x)",
-        ylab = "Dependent Variable (y)",
-        col = "blue"
+        xlab = "PD",
+        ylab = "Pred BSF incidence",
+        col = "lightgray"
       )
-      lines(data$PD, seg_preds,col = "red", lwd = 2)
+      lines(data_ord$PD, seg_preds,col = "red", lwd = 2)
       # View breakpoints and coefficients --> tresholds
       summary(segmented_model) #segmented model need to fit right the loess curve, 
       # adaptation of breakpoints number if needed (npsi) 
+      confint.segmented(segmented_model)
+      
     }
     
     # PD and Riparian Forest:
-    library(plotly)
     
     lo <- loess(data$pred ~ cbind(data$Riparian_Forest,data$PD))
+    lolci <- loess(data$lci ~ cbind(data$Riparian_Forest,data$PD))
+    louci <- loess(data$uci ~ cbind(data$Riparian_Forest,data$PD))
     save(lo,file="lo")
-    load("lo.Rdata")
+    save(lo,file="lolci")
+    save(lo,file="louci")
+    load("lo")
+    load("lolci")
+    load("louci")
     data$lo <- lo$fitted
+    data$lolci <- lolci$fitted
+    data$louci <- louci$fitted
     
-    plot_ly(y=data$PD, x=data$Riparian_Forest, z=data$lo,col = 'blue') # 3D representation
+    library(rgl) # 3D representation
+    
+    myColorRamp <- function(col, val) {
+      v <- (val - min(val))/diff(range(val))
+      x <- colorRamp(col)(v)
+      rgb(x[,1], x[,2], x[,3], maxColorValue = 255)
+    }
+    
+    cols <- myColorRamp(c("lightgrey","#64B5F6","#0D47A1","#020C75"),val=data$lo)
+    plot3d(y=data$PD, x=data$Riparian_Forest, z=data$lo,col=cols,axes=F,ylab="",zlab="",xlab="",
+           xlim=c(0,100),ylim=c(0,8),zlim=c(0,1.2))
+    grid3d(c("x+", "y+","z-"), col = "gray", lty = 1, lwd = 1)
+    axis3d('x-', tick = T,at = seq(0,100,20))
+    axis3d('y-', tick = T,at = seq(0,8,2))
+    axis3d('z+', tick = T,at = seq(0,1.2,0.2))
+    mtext3d("Riparian Forest", edge="x-", line=4)
+    mtext3d("PD", edge="y-", line=4)
+    mtext3d("BSF incidence", edge="z+", line=6)
+
+
     
     plot2 <- ggplot(data, aes(PD, Riparian_Forest, col = lo)) + 
       geom_point() +
@@ -742,15 +953,17 @@ save(mod_null,file="mod_null.Rdata")
       scale_colour_gradientn(colours = c("lightgrey","#64B5F6","#0D47A1","#020C75"),values=c(0,0.2,0.6,1.2))+
       theme(legend.position = c(0.9,0.75),axis.text=element_text(size=15,face="bold"),
             axis.title=element_text(size=15,face="bold"))
+    
     plot2 # in 2 dimensions
     
     # segmented model of Ripairan Forest
     {
       lo <- loess(pred~Riparian_Forest,data=data)
       data$lo <- lo$fitted
-      data <- data[order(data$Riparian_Forest, decreasing = F),]
+      data_ord <- data[order(data$Riparian_Forest, decreasing = F),]
+      
       library(segmented)
-      model <- lm(lo ~ Riparian_Forest, data = data)
+      model <- lm(lo ~ Riparian_Forest, data = data_ord)
       segmented_model <- segmented(model, seg.Z = ~Riparian_Forest,npsi=3,control = seg.control(n.boot=10,quant=T))
       seg_preds <- predict(segmented_model)
       seg_res <- data$lo - seg_preds
@@ -758,20 +971,22 @@ save(mod_null,file="mod_null.Rdata")
       plot(
         data$Riparian_Forest, data$lo,
         main = "Piecewise Regression Fit",
-        xlab = "Independent Variable (x)",
-        ylab = "Dependent Variable (y)",
-        col = "blue"
+        xlab = "Riparian Forest",
+        ylab = "Pred BSF incidence",
+        col = "lightgray"
       )
-      lines(data$Riparian_Forest, seg_preds,col = "red", lwd = 2)
+      lines(data_ord$Riparian_Forest, seg_preds,col = "red", lwd = 2)
       # View breakpoints and coefficients
       summary(segmented_model)
+      confint.segmented(segmented_model)
+      
     }
     
     # Mosaic of Uses:
     
     plot3 <- ggplot(data,aes(x=PLAND_Mosaic_of_Uses)) +
       geom_smooth(aes(y=lci),method="loess",se=F,size=1,linetype = "dashed",color="grey")+
-      geom_smooth(aes(y=pred,weight=w),method="loess",se=F,size=1,color="#FFD54F")+
+      geom_smooth(aes(y=pred),method="loess",se=F,size=1,color="#FFD54F")+
       geom_smooth(aes(y=uci),method="loess",se=F,size=1,linetype = "dashed",color="grey")+
       coord_cartesian(xlim = c(NA, NA), ylim = c(0, NA))+
       scale_y_continuous(breaks = seq(0, 1, by = 0.1))+
@@ -783,9 +998,14 @@ save(mod_null,file="mod_null.Rdata")
     
     # segmented model of Mosaic of Uses:
     {
+      
+      lo <- loess(pred~PLAND_Mosaic_of_Uses,data=data)
+      data$lo <- lo$fitted
+      data_ord <- data[order(data$PLAND_Mosaic_of_Uses, decreasing = F),]
+      
       library(segmented)
       
-      model <- lm(lo ~ PLAND_Mosaic_of_Uses, data = data)
+      model <- lm(lo ~ PLAND_Mosaic_of_Uses, data = data_ord)
       segmented_model <- segmented(model, seg.Z = ~PLAND_Mosaic_of_Uses,npsi=4,control = seg.control(n.boot=10,quant=T))
       seg_preds <- predict(segmented_model)
       seg_res <- data$lo - seg_preds
@@ -793,20 +1013,21 @@ save(mod_null,file="mod_null.Rdata")
       plot(
         data$PLAND_Mosaic_of_Uses, data$lo,
         main = "Piecewise Regression Fit",
-        xlab = "Independent Variable (x)",
-        ylab = "Dependent Variable (y)",
-        col = "blue"
+        xlab = "PLAND Mosaic of Uses",
+        ylab = "Pred BSF incidence",
+        col = "lightgray"
       )
-      lines(data$PLAND_Mosaic_of_Uses, seg_preds,col = "red", lwd = 2)
+      lines(data_ord$PLAND_Mosaic_of_Uses, seg_preds,col = "red", lwd = 2)
       # View breakpoints and coefficients
       summary(segmented_model)
+      confint.segmented(segmented_model)
     }
 
     
     plot4 <- ggplot(data,aes(x=temp)) +
-      geom_smooth(aes(y=lci),method="loess",se=F,size=1,linetype = "dashed",color="grey")+
+      #geom_smooth(aes(y=lci),method="loess",se=F,size=1,linetype = "dashed",color="grey")+
       geom_smooth(aes(y=pred),method="loess",se=F,size=1,color="#E57373")+
-      geom_smooth(aes(y=uci),method="loess",se=F,size=1,linetype = "dashed",color="grey")+
+      #geom_smooth(aes(y=uci),method="loess",se=F,size=1,linetype = "dashed",color="grey")+
       coord_cartesian(xlim = c(NA, NA), ylim = c(0, NA))+
       xlab("temp") + 
       ylab(" ")+
@@ -817,8 +1038,13 @@ save(mod_null,file="mod_null.Rdata")
     
     # segmented model of temp:
     {
+      
+      lo <- loess(pred~temp,data=data)
+      data$lo <- lo$fitted
+      data_ord <- data[order(data$temp, decreasing = F),]
+      
       library(segmented)
-      model <- lm(lo ~ temp, data = data)
+      model <- lm(lo ~ temp, data = data_ord)
       segmented_model <- segmented(model, seg.Z = ~temp,npsi=2,control = seg.control(n.boot=10,quant=T))
       seg_preds <- predict(segmented_model)
       seg_res <- data$lo - seg_preds
@@ -826,15 +1052,55 @@ save(mod_null,file="mod_null.Rdata")
       plot(
         data$temp, data$lo,
         main = "Piecewise Regression Fit",
-        xlab = "Independent Variable (x)",
-        ylab = "Dependent Variable (y)",
-        col = "blue"
+        xlab = "temp",
+        ylab = "Pred BSF incidence",
+        col = "lightgray"
       )
-      lines(data$temp, seg_preds,col = "red", lwd = 2)
+      lines(data_ord$temp, seg_preds,col = "red", lwd = 2)
       # View breakpoints and coefficients
       summary(segmented_model)
+      confint.segmented(segmented_model)
     }
     
+    
+    # prec:
+    plot5 <- ggplot(data,aes(x=prec)) +
+      geom_smooth(aes(y=lci),method="loess",se=F,size=1,linetype = "dashed",color="grey")+
+      geom_smooth(aes(y=pred),method="loess",se=F,size=1,color="#0D47A1")+
+      geom_smooth(aes(y=uci),method="loess",se=F,size=1,linetype = "dashed",color="grey")+
+      coord_cartesian(xlim = c(NA, NA), ylim = c(0, NA))+
+      xlab("prec") + ylab("Pred BSF incidence")+
+      theme_bw() + theme(legend.position = "none",axis.text=element_text(size=15,face="bold"),
+                         axis.title=element_text(size=15,face="bold"))
+    
+    plot5
+    
+    # segmented model of prec:
+    {
+      
+      lo <- loess(pred~prec,data=data)
+      data$lo <- lo$fitted
+      data_ord <- data[order(data$prec, decreasing = F),]
+      
+      library(segmented)
+      
+      model <- lm(lo ~ prec, data = data_ord)
+      segmented_model <- segmented(model, seg.Z = ~prec,npsi=4,control = seg.control(n.boot=10,quant=T))
+      seg_preds <- predict(segmented_model)
+      seg_res <- data$lo - seg_preds
+      # Plot the original data with the fitted model
+      plot(
+        data$prec, data$lo,
+        main = "Piecewise Regression Fit",
+        xlab = "prec",
+        ylab = "Pred BSF incidence",
+        col = "lightgray"
+      )
+      lines(data_ord$prec, seg_preds,col = "red", lwd = 2)
+      # View breakpoints and coefficients
+      summary(segmented_model)
+      confint.segmented(segmented_model)
+    }
     
   }
   
@@ -844,23 +1110,23 @@ save(mod_null,file="mod_null.Rdata")
 # Moran'I test (spatial autocorrelation):                                                       ####
 {
   library(terra) 
+  library(joyn)
   library(sf) 
   library(spdep) 
   library(rgdal) 
-  library(DHARMa) 
+  library(dplyr)
   
-  load("land_32.Rdata")
+  load("ls_11.Rdata")
   Coord <- read.csv("Coordinates_Centroids_Munic.csv",header=T) # Centroid coordinates of municipality,
   data_coord <- data 
-  resid <- simulateResiduals(land_32) # residuals
+  resid <- simulateResiduals(ls_11) # residuals
 
   data_coord$resid <- residuals(resid)
-  data_coord <- merge(data_coord, Coord, by=c("CD_NUM"),all.x=TRUE)
-  data_coord <- data_coord[data_coord$Year==2019,]                      # repeat that code for every year
+  data_coord <- merge(data_coord, Coord, by=c("CD_NUM"),all.x=TRUE)               
   
-  shp <- readOGR(dsn = "Zone_studied.shp", layer = "Zone_studied")
+  shp <- readOGR(dsn = "Zone_studied.shp", layer = "Zone_studied")       # repeat that code for every year
+  shp@data <- left_join(shp@data,data_coord[data_coord$Year==2019,],by="CD_NUM")
   
-  shp@data <- left_join(shp@data,data_coord,by="CD_NUM")
   
   wm_q <- poly2nb(shp, queen = TRUE) # queen neighbourhood relation between the municipalities
   save(wm_q,file="wm_q.Rdata")
@@ -869,6 +1135,14 @@ save(mod_null,file="mod_null.Rdata")
   rswm_q <- nb2listw(wm_q, style = "W", zero.policy = TRUE) #list of neighbours
   
   moran.test(as.numeric(shp$resid), listw = rswm_q, zero.policy = TRUE, na.action = na.omit)
+  
+  
+  plot <- ggplot(data_coord[data_coord$Year==2013,],aes(x=X,y=Y,color=resid)) +
+    geom_point()+ labs(title="Model residuals across the Atlantic Forest")+
+    theme_bw() + theme(axis.text=element_text(size=15,face="bold"),
+                       axis.title=element_text(size=15,face="bold")) +scale_color_gradientn(colors=c("blue","grey","red")) 
+  
+  plot
 
 
   #The Moran's I statistic ranges from -1 to 1. Values in the interval (-1, 0) indicate negative spatial 
@@ -877,7 +1151,7 @@ save(mod_null,file="mod_null.Rdata")
   #the interval (0,1) indicate positive spatial autocorrelation (spatial clusters of similarly low or high 
   #values between neighbour municipalities should be expected.)
   
+  
 }
 
-  
 
