@@ -1,4 +1,4 @@
-Data and Rcode repository of the study: **"Can landscape management provide disease regulation services? A case study of Brazilian spotted fever incidence."**
+Data and Rcode repository of the study: **"Can landscape management provide disease regulation services? A case study of Brazilian spotted fever incidence"**
 
 **Graphical abstract**\
 <img src="graphical_abstract_Landscape_effects_BSF_manuscript.png" align="center" alt="" />
