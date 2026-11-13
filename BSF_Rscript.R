@@ -800,15 +800,18 @@ save(mod_null,file="mod_null.Rdata")
   
   #Cross-validation with RMSE:
   library(cv)
-  time <- system.time(cv_ls11 <- cv(ls_11,data=data, k=10, criterion=rmse)) 
-  time <- system.time(cv_ls11zi <-cv(ls_11zi,data=data, k=10, criterion=rmse))
-  time <- system.time(cv_ls11zi2 <-cv(ls_11zi2,data=data, k=10, criterion=rmse)) 
-  time <- system.time(cv_ls11zi6 <-cv(ls_11zi6,data=data, k=10, criterion=rmse)) 
-  time <- system.time(cv_ls11dis <-cv(ls_11dis,data=data, k=10, criterion=rmse)) 
-  time <- system.time(cv_ls11dis2 <-cv(ls_11dis2,data=data, k=10, criterion=rmse))
-  time <- system.time(cv_ls11diszi3 <-cv(ls_11diszi3,data=data, k=10, criterion=rmse))
-  time <- system.time(cv_ls14 <-cv(ls_14,data=data, k=10, criterion=rmse))
-  time <- system.time(cv_null <-cv(mod_null,data=data, k=10, criterion=rmse))
+  
+  # without stratified fold:
+  
+  time <- system.time(cv_ls11 <- cv(ls_11,data=data, k=10, criterion=rmse,seed=451487,ncores = 10)) # to see if results are reproducible, try different seeds
+  time <- system.time(cv_ls11zi <-cv(ls_11zi,data=data, k=10, criterion=rmse,seed=451487,ncores = 10))
+  time <- system.time(cv_ls11zi2 <-cv(ls_11zi2,data=data, k=10, criterion=rmse,seed=451487,ncores = 10)) 
+  time <- system.time(cv_ls11zi6 <-cv(ls_11zi6,data=data, k=10, criterion=rmse,seed=451487,ncores = 10)) 
+  time <- system.time(cv_ls11dis <-cv(ls_11dis,data=data, k=10, criterion=rmse,seed=451487,ncores = 10)) 
+  time <- system.time(cv_ls11dis2 <-cv(ls_11dis2,data=data, k=10, criterion=rmse,seed=451487,ncores = 10))
+  time <- system.time(cv_ls11diszi3 <-cv(ls_11diszi3,data=data, k=10, criterion=rmse,seed=451487,ncores = 10))
+  time <- system.time(cv_ls14 <-cv(ls_14,data=data, k=10, criterion=rmse,seed=451487,ncores = 10))
+  time <- system.time(cv_null <-cv(mod_null,data=data, k=10, criterion=rmse,seed=451487,ncores = 10))
   
   save(cv_ls11,file="cv_ls11.RData")
   save(cv_ls11zi,file="cv_ls11zi.RData")
@@ -828,7 +831,8 @@ save(mod_null,file="mod_null.Rdata")
       c("cv_ls11zi6",round(cv_ls11zi6$`CV crit`,4),round(cv_ls11zi6$`full crit`,4)),
       c("cv_ls11dis",round(cv_ls11dis$`CV crit`,4),round(cv_ls11dis$`full crit`,4)),
       c("cv_ls11dis2",round(cv_ls11dis2$`CV crit`,4),round(cv_ls11dis2$`full crit`,4)),
-      c("cv_ls11diszi3",round(cv_ls11diszi3$`CV crit`,4),round(cv_ls11diszi3$`full crit`,4))
+      c("cv_ls11diszi3",round(cv_ls11diszi3$`CV crit`,4),round(cv_ls11diszi3$`full crit`,4)),
+      c("cv_null",round(cv_ls11diszi3$`CV crit`,4),round(cv_ls11diszi3$`full crit`,4))
       
       
       )
@@ -837,17 +841,52 @@ save(mod_null,file="mod_null.Rdata")
   cv_rmse
   save(cv_rmse,file="cv_rmse.RData")
   load("cv_rmse.RData")
-  
+
+  #rmse doesn't improve much between model, rmse also stay similar when performing external cv with 2020 and 2021 (done eslewhere)
 
   
+  # Using stratified folds (2% of non zero value of BSF cases in each): 
+  library(rsample)
+  library(caret)
+  data <- mutate(data,strata_var = as.factor(BSF_cases != 0))
   
-  #rmse doesn't improve much between model, rmse also stay the similar when performing external cv with 2020 and 2021 (done eslewhere)
+  set.seed(451487)
+  folds <- createFolds(as.factor(data$BSF_cases != 0), k = 10, list = TRUE)
+  sapply(cv_splits$splits, function(s) mean(assessment(s)$BSF_cases != 0))
+  
+  sapply(folds, function(idx_test) {
+    mean(data$BSF_cases[idx_test] != 0)
+  })
+  
+  # CV with 10-stratified-folds:
+  rmse <- sapply(folds, function(idx_test) {
+    
+    train_data <- data[-idx_test, ]
+    test_data  <- data[idx_test, ]
+    
+    #mod <- glmmTMB(BSF_cases ~ Riparian_Forest*PD + PLAND_Mosaic_of_Uses + temp + prec
+    #               + offset(log(Population)) + (1|Year)+ (1|CD_NUM),family=nbinom1(link="log"), data=train_data)
+    
+    mod <- glmmTMB(BSF_cases ~ 1 
+                   + offset(log(Population)) + (1|Year) + (1|CD_NUM),family=nbinom1(link="log"), data=train_data)
+    
+    preds <- predict(mod, newdata = test_data, type = "response",se.fit=FALSE)
+    
+    rmse(test_data$BSF_cases, preds)
+  })
+  
+  mean(rmse) #ls_11 : 0.3212 ; null : 0.3208
+  
+  # does not change meaningfully from "without stratification of the folds"
+  
+  
+  
   
   r2_nakagawa(ls_11zi6) # cond: 0.261 ; marginal : 0.020
   r2_nakagawa(ls_11zi2) # cond: 0.228 ; marginal : 0.024
   r2_nakagawa(ls_11) # cond: 0.270 ; marginal : 0.020
   
-  # Pseudo R2 provided for informative purpose, not my religion tho
+  # Pseudo R2 provided for informative purpose, not my religion tho...
 
 
   
